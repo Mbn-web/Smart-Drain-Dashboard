@@ -1,0 +1,71 @@
+{
+  "project_name": "Smart Drain AI",
+  "app_type": "dashboard",
+  "theme": "dark",
+  "typography": {
+    "heading_font": "Chivo",
+    "body_font": "IBM Plex Sans",
+    "mono_font": "JetBrains Mono"
+  },
+  "colors": {
+    "background": "#0B0F17",
+    "surface": "#131C2E",
+    "surface_card": "#182238",
+    "border": "#23324E",
+    "primary": "#00E5FF",
+    "secondary": "#3B82F6",
+    "text_primary": "#F1F5F9",
+    "text_secondary": "#94A3B8",
+    "healthy": "#10B981",
+    "warning": "#F59E0B",
+    "critical": "#EF4444"
+  },
+  "visual_enhancers": {
+    "glassmorphism": "backdrop-blur-xl bg-[#131C2E]/80 border border-[#23324E]/60",
+    "glow_effects": "shadow-[0_0_20px_rgba(0,229,255,0.15)]",
+    "border_radius": "rounded-lg"
+  },
+  "grids": {
+    "dashboard_grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6"
+  },
+  "layouts": {
+    "sidebar_navigation": true,
+    "topbar_with_system_status": true
+  },
+  "motion": {
+    "transition_speed": "0.2s",
+    "easing": "ease-out"
+  },
+  "accessibility": {
+    "apca_compliant": true,
+    "focus_rings": "focus:ring-2 focus:ring-[#00E5FF]"
+  },
+  "media": {
+    "esp32_cam_streams": true,
+    "leaflet_gis_map": true
+  },
+  "image_urls": [
+    {
+      "category": "esp32_cam_node",
+      "description": "ESP32-CAM live feed simulation of Mumbai underground drainage chamber showing water flow and debris",
+      "url": "https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=800&q=80"
+    },
+    {
+      "category": "mumbai_infrastructure",
+      "description": "Mumbai cityscape monsoon drainage overview",
+      "url": "https://images.unsplash.com/photo-1570168007204-dfb528c6958f?auto=format&fit=crop&w=1200&q=80"
+    },
+    {
+      "category": "sensor_node",
+      "description": "Industrial IoT ultrasonic water level sensor in manhole",
+      "url": "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80"
+    }
+  ],
+  "instructions_to_main_agent": "Ensure all interactive elements have data-testid. Use Tailwind CSS with the specified dark navy palette (#0B0F17, #00E5FF accent, #10B981 green, #F59E0B amber, #EF4444 red). Implement Leaflet map for Mumbai drainage GIS nodes, ESP32-CAM video stream modal/view, analytics 30-day health chart, alert management, and login screen with municipal badge.",
+  "universal_guidelines": [
+    "Always include data-testid on interactive elements",
+    "Use dark navy and electric cyan engineering theme",
+    "Never use fully transparent backgrounds without blur",
+    "Ensure high contrast text for accessibility"
+  ]
+}
