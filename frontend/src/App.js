@@ -1,56 +1,1284 @@
-import { useEffect } from "react";
-import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
-import { HOME } from "@/constants/testIds";
+import React, { useState } from "react";
+import { 
+  ShieldAlert, Activity, Cpu, Camera, Radio, Database, 
+  Lock, Eye, EyeOff, CheckCircle2, AlertTriangle, XCircle, 
+  Search, Filter, ArrowRight, RefreshCw, Layers, MapPin, 
+  CloudRain, TrendingUp, BarChart3, Bell, User, LogOut, ExternalLink,
+  ChevronRight, RadioTower, Globe
+} from "lucide-react";
+import { toast, Toaster } from "sonner";
+import { DRAINS, ALERTS, SYSTEM_STATS, WEATHER_DATA } from "./mock";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { 
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, 
+  PieChart, Pie, Cell, BarChart, Bar, CartesianGrid, Legend 
+} from "recharts";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+// Fix Leaflet marker icons in React
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
+// Custom Leaflet marker icons by status
+const createCustomIcon = (status) => {
+  let color = "#22c55e"; // green
+  if (status === "critical") color = "#ef4444"; // red
+  if (status === "warning") color = "#f59e0b"; // amber
 
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
-
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          data-testid={HOME.emergentLink}
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
+  return L.divIcon({
+    className: 'custom-map-marker',
+    html: `<div style="background-color: ${color}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #ffffff; box-shadow: 0 0 10px ${color};"></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8]
+  });
 };
 
-function App() {
+export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, drains, analytics, alerts
+  const [selectedDrain, setSelectedDrain] = useState(null);
+  
+  // Login form state
+  const [employeeId, setEmployeeId] = useState("BMC-OPS-4091");
+  const [password, setPassword] = useState("••••••••••••");
+  const [showPassword, setShowPassword] = useState(false);
+  const [authenticating, setAuthenticating] = useState(false);
+
+  // Filters state
+  const [drainSearch, setDrainSearch] = useState("");
+  const [drainFilter, setDrainFilter] = useState("all"); // all, healthy, warning, critical
+  const [alertFilter, setAlertFilter] = useState("all"); // all, critical, warning, resolved
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    setAuthenticating(true);
+    setTimeout(() => {
+      setAuthenticating(false);
+      setIsLoggedIn(true);
+      toast.success("Authenticated & Initialized", {
+        description: `Welcome back, Inspector ${employeeId}. Secure BMC session active.`
+      });
+    }, 1200);
+  };
+
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    setSelectedDrain(null);
+    toast.info("Session Terminated", { description: "Logged out from BMC Infrastructure Portal." });
+  };
+
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col justify-between p-6 md:p-12 relative overflow-hidden font-mono">
+        <Toaster position="top-right" theme="dark" />
+        
+        {/* Subtle background tech rings / grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f293d_1px,transparent_1px),linear-gradient(to_bottom,#1f293d_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-20 pointer-events-none" />
+        <div className="absolute top-1/4 right-1/4 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Top Header branding */}
+        <div className="max-w-7xl mx-auto w-full flex justify-between items-center z-10">
+          <div className="flex items-center space-x-3">
+            <div className="bg-amber-500/20 border border-amber-500/40 p-2 rounded-lg text-amber-400">
+              <span className="font-bold tracking-widest text-xs">#</span>
+            </div>
+            <div>
+              <span className="text-xs uppercase tracking-widest text-blue-400 font-semibold block">IoT Drainage Intelligence</span>
+              <h1 className="text-lg font-bold tracking-tight text-white">SMART DRAIN AI</h1>
+            </div>
+          </div>
+          <div className="hidden sm:flex items-center space-x-2 text-xs text-slate-400 border border-slate-800 bg-slate-900/60 px-3 py-1.5 rounded-md">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>MUNICIPAL GRID v2.4</span>
+          </div>
+        </div>
+
+        {/* Main Split Screen */}
+        <div className="max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-12 items-center my-auto z-10 py-12">
+          
+          {/* Left Side Branding */}
+          <div className="lg:col-span-7 space-y-8">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs tracking-wider uppercase">
+              <span>Brihanmumbai Municipal Corporation</span>
+            </div>
+
+            <h2 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-none">
+              BMC Infrastructure <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">Portal</span>
+            </h2>
+
+            <p className="text-slate-300 text-base sm:text-lg max-w-xl font-sans leading-relaxed">
+              Real-time monitoring and intelligent health assessment of urban drainage infrastructure across Greater Mumbai.
+            </p>
+
+            {/* System Status Card */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md shadow-2xl max-w-lg space-y-4">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">SYS STATUS: OPERATIONAL</span>
+                </div>
+                <span className="text-[10px] text-slate-500">PROTOTYPE MODE</span>
+              </div>
+              <p className="text-xs text-slate-400 font-sans">
+                Telemetry connection verified. Active sensors: <strong className="text-white">847</strong> across Greater Mumbai region.
+              </p>
+              <div className="grid grid-cols-3 gap-4 pt-2 border-t border-slate-800">
+                <div>
+                  <span className="text-2xl font-bold text-white block">847</span>
+                  <span className="text-[10px] text-slate-400 uppercase">Total Drains</span>
+                </div>
+                <div>
+                  <span className="text-2xl font-bold text-amber-400 block">23</span>
+                  <span className="text-[10px] text-slate-400 uppercase">Active Alerts</span>
+                </div>
+                <div>
+                  <span className="text-2xl font-bold text-emerald-400 block">98.2%</span>
+                  <span className="text-[10px] text-slate-400 uppercase">System Uptime</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Side Login Card */}
+          <div className="lg:col-span-5">
+            <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-xl shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-400" />
+              
+              <div className="mb-6 space-y-1">
+                <h3 className="text-lg font-bold text-white tracking-wide">BMC Infrastructure Portal</h3>
+                <p className="text-xs text-slate-400 font-sans">Authorized access only. Log in with civic credentials to view live telemetry.</p>
+              </div>
+
+              <form onSubmit={handleLogin} className="space-y-5">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-semibold tracking-wider uppercase text-slate-400 block">
+                    Employee ID / BMC-UID
+                  </label>
+                  <input
+                    data-testid="employee-id-input"
+                    type="text"
+                    value={employeeId}
+                    onChange={(e) => setEmployeeId(e.target.value)}
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] font-semibold tracking-wider uppercase text-slate-400 block">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      data-testid="password-input"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono pr-10"
+                    />
+                    <button
+                      data-testid="toggle-password-btn"
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  data-testid="authenticate-btn"
+                  type="submit"
+                  disabled={authenticating}
+                  className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold py-3.5 px-4 rounded-lg transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer uppercase tracking-wider text-xs"
+                >
+                  {authenticating ? (
+                    <>
+                      <RefreshCw className="animate-spin" size={16} />
+                      <span>Authenticating Sensors...</span>
+                    </>
+                  ) : (
+                    <span>Authenticate & Initialize</span>
+                  )}
+                </button>
+
+                <div className="text-center pt-2">
+                  <span className="text-[10px] text-red-400/80 tracking-widest uppercase">Secure Session Timeout in 4 hours</span>
+                </div>
+              </form>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Footer */}
+        <div className="max-w-7xl mx-auto w-full flex flex-col sm:flex-row justify-between items-center text-xs text-slate-500 z-10 pt-6 border-t border-slate-900">
+          <span>Brihanmumbai Municipal Corporation (BMC) © 2026</span>
+          <span>IoT Disaster Management & Flood Control Wing</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Active Application Shell
   return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+    <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col font-mono selection:bg-blue-500 selection:text-white">
+      <Toaster position="top-right" theme="dark" />
+
+      {/* Top Navigation */}
+      <header className="bg-slate-900/90 border-b border-slate-800 sticky top-0 z-50 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setSelectedDrain(null) || setActiveTab("dashboard")}>
+              <div className="bg-blue-600/20 border border-blue-500/40 p-2 rounded-lg text-blue-400">
+                <span className="font-bold tracking-widest text-xs">#</span>
+              </div>
+              <div>
+                <span className="text-[10px] uppercase tracking-widest text-blue-400 font-semibold block">BMC Platform</span>
+                <span className="text-sm font-bold tracking-tight text-white">Smart Drain AI</span>
+              </div>
+            </div>
+
+            <nav className="hidden md:flex items-center space-x-1 pl-6 border-l border-slate-800">
+              <button
+                data-testid="nav-dashboard"
+                onClick={() => { setSelectedDrain(null); setActiveTab("dashboard"); }}
+                className={`px-3 py-2 rounded-md text-xs font-medium transition-colors ${activeTab === 'dashboard' && !selectedDrain ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+              >
+                Dashboard
+              </button>
+              <button
+                data-testid="nav-drains"
+                onClick={() => { setSelectedDrain(null); setActiveTab("drains"); }}
+                className={`px-3 py-2 rounded-md text-xs font-medium transition-colors ${activeTab === 'drains' && !selectedDrain ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+              >
+                Drains
+              </button>
+              <button
+                data-testid="nav-analytics"
+                onClick={() => { setSelectedDrain(null); setActiveTab("analytics"); }}
+                className={`px-3 py-2 rounded-md text-xs font-medium transition-colors ${activeTab === 'analytics' && !selectedDrain ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+              >
+                Analytics
+              </button>
+              <button
+                data-testid="nav-alerts"
+                onClick={() => { setSelectedDrain(null); setActiveTab("alerts"); }}
+                className={`px-3 py-2 rounded-md text-xs font-medium transition-colors ${activeTab === 'alerts' && !selectedDrain ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+              >
+                Alerts
+              </button>
+            </nav>
+          </div>
+
+          <div className="flex items-center space-x-4">
+            <div className="hidden lg:flex items-center space-x-2 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1 rounded-full text-xs text-emerald-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>SYSTEM ONLINE</span>
+            </div>
+
+            <div className="text-right hidden sm:block">
+              <span className="text-xs font-bold text-white block">BMC Infrastructure Portal</span>
+              <span className="text-[10px] text-slate-400">Inspector {employeeId}</span>
+            </div>
+
+            <button
+              data-testid="logout-btn"
+              onClick={handleLogout}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-2 rounded-lg transition-colors border border-slate-700"
+              title="Terminate Session"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Navigation bar */}
+        <div className="md:hidden flex justify-around bg-slate-950 border-t border-slate-800 py-2">
+          <button onClick={() => { setSelectedDrain(null); setActiveTab("dashboard"); }} className={`text-xs ${activeTab === 'dashboard' && !selectedDrain ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>Dashboard</button>
+          <button onClick={() => { setSelectedDrain(null); setActiveTab("drains"); }} className={`text-xs ${activeTab === 'drains' && !selectedDrain ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>Drains</button>
+          <button onClick={() => { setSelectedDrain(null); setActiveTab("analytics"); }} className={`text-xs ${activeTab === 'analytics' && !selectedDrain ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>Analytics</button>
+          <button onClick={() => { setSelectedDrain(null); setActiveTab("alerts"); }} className={`text-xs ${activeTab === 'alerts' && !selectedDrain ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>Alerts</button>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        
+        {/* If a drain is selected, render Drain Detail Page */}
+        {selectedDrain ? (
+          <DrainDetailPage drain={selectedDrain} onBack={() => setSelectedDrain(null)} />
+        ) : (
+          <>
+            {/* Dashboard View */}
+            {activeTab === "dashboard" && (
+              <DashboardView 
+                onSelectDrain={(d) => setSelectedDrain(d)} 
+                onNavigate={(tab) => setActiveTab(tab)} 
+              />
+            )}
+
+            {/* Drains Table View */}
+            {activeTab === "drains" && (
+              <DrainsListView 
+                onSelectDrain={(d) => setSelectedDrain(d)} 
+                searchQuery={drainSearch} 
+                setSearchQuery={setDrainSearch}
+                filter={drainFilter}
+                setFilter={setDrainFilter}
+              />
+            )}
+
+            {/* Analytics View */}
+            {activeTab === "analytics" && (
+              <AnalyticsView />
+            )}
+
+            {/* Alerts View */}
+            {activeTab === "alerts" && (
+              <AlertsView 
+                onSelectDrain={(drainId) => {
+                  const found = DRAINS.find(d => d.id === drainId);
+                  if (found) setSelectedDrain(found);
+                }}
+                filter={alertFilter}
+                setFilter={setAlertFilter}
+              />
+            )}
+          </>
+        )}
+
+      </main>
+
+      {/* Bottom Status Bar */}
+      <footer className="bg-slate-950 border-t border-slate-900 py-3 text-xs text-slate-400 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center gap-4">
+          <div className="flex items-center space-x-6">
+            <span className="flex items-center gap-1.5">
+              <span className="text-slate-500">LAST SYNC</span>
+              <strong className="text-slate-200">{SYSTEM_STATS.lastSync}</strong>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <strong className="text-slate-200">3 IoT NODES</strong>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <strong className="text-slate-200">GATEWAY CONNECTED</strong>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <strong className="text-slate-200">DATABASE ONLINE</strong>
+            </span>
+          </div>
+          <div className="text-[10px] text-slate-500">
+            PROTOTYPE REAL-TIME TELEMETRY STREAM • ESP32 MUNICIPAL MESH
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
 
-export default App;
+// 1. DASHBOARD VIEW COMPONENT
+function DashboardView({ onSelectDrain, onNavigate }) {
+  return (
+    <div className="space-y-8 animate-fadeIn">
+      
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-6">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] uppercase px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">DEMO DATA PROTOTYPE</span>
+            <span className="text-xs text-slate-400">{new Date().toLocaleDateString('en-IN', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} • IST</span>
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Municipal Drainage Overview</h2>
+          <p className="text-slate-400 text-xs sm:text-sm">Real-time infrastructure health and drainage monitoring across Greater Mumbai.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button 
+            data-testid="view-all-drains-btn"
+            onClick={() => onNavigate("drains")}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-4 py-2.5 rounded-lg border border-slate-700 transition-colors flex items-center gap-2"
+          >
+            <span>Browse All Drains</span>
+            <ArrowRight size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Top Health Statistics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        
+        <div data-testid="stat-total-drains" className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex flex-col justify-between">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Drains</span>
+          <div className="flex items-baseline justify-between mt-3">
+            <span className="text-3xl font-black text-white">{SYSTEM_STATS.monitoredDrains}</span>
+            <span className="text-xs text-blue-400">Active Mesh</span>
+          </div>
+        </div>
+
+        <div data-testid="stat-healthy-drains" className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex flex-col justify-between">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Healthy</span>
+          <div className="flex items-baseline justify-between mt-3">
+            <span className="text-3xl font-black text-emerald-400">{SYSTEM_STATS.healthyCount}</span>
+            <span className="text-xs text-emerald-500">Normal Flow</span>
+          </div>
+        </div>
+
+        <div data-testid="stat-warning-drains" className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex flex-col justify-between">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">Warning</span>
+          <div className="flex items-baseline justify-between mt-3">
+            <span className="text-3xl font-black text-amber-400">{SYSTEM_STATS.warningCount}</span>
+            <span className="text-xs text-amber-500">Elevated Level</span>
+          </div>
+        </div>
+
+        <div data-testid="stat-critical-drains" className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex flex-col justify-between">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-red-400">Critical</span>
+          <div className="flex items-baseline justify-between mt-3">
+            <span className="text-3xl font-black text-red-400">{SYSTEM_STATS.criticalCount}</span>
+            <span className="text-xs text-red-500">Blockage Risk</span>
+          </div>
+        </div>
+
+        {/* Donut Card for Average Health */}
+        <div data-testid="stat-avg-health" className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex items-center justify-between sm:col-span-2 lg:col-span-1">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Avg Drain Health</span>
+            <span className="text-3xl font-black text-blue-400">82%</span>
+            <span className="text-[10px] text-slate-500 block mt-1">Municipal Index</span>
+          </div>
+          <div className="w-16 h-16 relative flex items-center justify-center">
+            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+              <path className="text-slate-800" strokeWidth="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              <path className="text-blue-400" strokeDasharray="82, 100" strokeWidth="3.5" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <span className="absolute text-[11px] font-bold text-white">82%</span>
+          </div>
+        </div>
+
+      </div>
+
+      {/* GIS MAP SECTION (Leaflet) */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <MapPin size={18} className="text-blue-400" />
+              <span>Real-Time Mumbai GIS Infrastructure Map</span>
+            </h3>
+            <p className="text-xs text-slate-400">OpenStreetMap integration covering Borivali, Malad, Andheri, Bandra, Dadar, Chembur & Colaba.</p>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Healthy</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Warning</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-500"></span> Critical</span>
+          </div>
+        </div>
+
+        <div className="w-full h-[450px] rounded-lg overflow-hidden border border-slate-800 relative z-0">
+          <MapContainer 
+            center={[19.0760, 72.8777]} 
+            zoom={11} 
+            style={{ width: "100%", height: "100%", background: "#0b1329" }}
+            scrollWheelZoom={false}
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            />
+            {DRAINS.map((drain) => (
+              <Marker 
+                key={drain.id}
+                position={[drain.latitude, drain.longitude]}
+                icon={createCustomIcon(drain.status)}
+              >
+                <Popup>
+                  <div className="p-2 font-mono text-slate-900 min-w-[200px]">
+                    <div className="flex justify-between items-center mb-1">
+                      <strong className="text-sm font-bold">{drain.id}</strong>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase font-bold ${drain.status === 'critical' ? 'bg-red-100 text-red-800' : drain.status === 'warning' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                        {drain.status}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-600 mb-2 font-semibold">{drain.location}, Mumbai</div>
+                    <div className="text-xs space-y-1 border-t border-slate-200 pt-1.5">
+                      <div>Health Score: <strong className={drain.healthScore < 50 ? 'text-red-600' : 'text-slate-800'}>{drain.healthScore}%</strong></div>
+                      <div>Water Level: <strong>{drain.waterLevel} cm</strong></div>
+                      <div>Flow Rate: <strong>{drain.flowRate} L/min</strong></div>
+                    </div>
+                    <button
+                      onClick={() => onSelectDrain(drain)}
+                      className="mt-3 w-full bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold py-1.5 px-3 rounded text-center transition-colors uppercase tracking-wider block"
+                    >
+                      Open Drain Detail
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+          </MapContainer>
+        </div>
+      </div>
+
+      {/* Two Column Section: Critical Drains & Module Health */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* Top Critical Drains (7 cols) */}
+        <div className="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <ShieldAlert size={18} className="text-red-400" />
+              <span>Top Critical & Warning Drains</span>
+            </h3>
+            <button 
+              onClick={() => onNavigate("drains")}
+              className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              View all ({DRAINS.length}) →
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400">
+                  <th className="pb-3 font-semibold">Drain ID</th>
+                  <th className="pb-3 font-semibold">Location</th>
+                  <th className="pb-3 font-semibold">Health</th>
+                  <th className="pb-3 font-semibold">Water Level</th>
+                  <th className="pb-3 font-semibold">Status</th>
+                  <th className="pb-3 text-right font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {DRAINS.filter(d => d.status === 'critical' || d.status === 'warning').slice(0, 5).map((drain) => (
+                  <tr key={drain.id} className="hover:bg-slate-800/40 transition-colors cursor-pointer" onClick={() => onSelectDrain(drain)}>
+                    <td className="py-3 font-bold text-white flex items-center gap-2">
+                      <span>{drain.id}</span>
+                      <span className="text-[9px] text-slate-500">[{drain.dataSource}]</span>
+                    </td>
+                    <td className="py-3 text-slate-300">{drain.location}</td>
+                    <td className="py-3">
+                      <span className={`font-bold ${drain.healthScore < 50 ? 'text-red-400' : 'text-amber-400'}`}>
+                        {drain.healthScore}%
+                      </span>
+                    </td>
+                    <td className="py-3 text-slate-300">{drain.waterLevel} cm</td>
+                    <td className="py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
+                        drain.status === 'critical' 
+                          ? 'bg-red-950/80 text-red-400 border border-red-500/30' 
+                          : 'bg-amber-950/80 text-amber-400 border border-amber-500/30'
+                      }`}>
+                        {drain.status}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right">
+                      <button className="text-blue-400 hover:text-blue-300 font-semibold">Inspect →</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Module Health & Weather (5 cols) */}
+        <div className="lg:col-span-5 space-y-6">
+          
+          {/* Module Health Card */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Cpu size={18} className="text-blue-400" />
+              <span>Module Health & Sensors</span>
+            </h3>
+
+            <div className="space-y-3 pt-1">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300 flex items-center gap-2"><Activity size={14} className="text-emerald-400" /> Water Level Sensor</span>
+                <span className="text-emerald-400 font-bold flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> ONLINE</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300 flex items-center gap-2"><Activity size={14} className="text-emerald-400" /> Flow Sensor</span>
+                <span className="text-emerald-400 font-bold flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> ONLINE</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300 flex items-center gap-2"><Cpu size={14} className="text-emerald-400" /> ESP32 Node</span>
+                <span className="text-emerald-400 font-bold flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> ONLINE</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300 flex items-center gap-2"><Camera size={14} className="text-emerald-400" /> ESP32-CAM</span>
+                <span className="text-emerald-400 font-bold flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> ONLINE</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300 flex items-center gap-2"><Radio size={14} className="text-emerald-400" /> Gateway Connection</span>
+                <span className="text-emerald-400 font-bold flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> CONNECTED</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-800 text-center text-xs">
+              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 text-[10px] block uppercase">Sensors Online</span>
+                <span className="text-white font-bold">{SYSTEM_STATS.sensorsOnline}</span>
+              </div>
+              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 text-[10px] block uppercase">ESP32 Nodes</span>
+                <span className="text-white font-bold">{SYSTEM_STATS.esp32NodesOnline}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Weather & Rainfall Card */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <CloudRain size={18} className="text-cyan-400" />
+                <span>Monsoon & Rainfall Status</span>
+              </h3>
+              <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-red-950 text-red-400 border border-red-500/30">
+                Flood Risk: HIGH
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                <span className="text-slate-400 uppercase text-[10px]">Condition</span>
+                <span className="text-white font-bold block">{WEATHER_DATA.condition}</span>
+                <span className="text-cyan-400 text-[10px]">Temp: {WEATHER_DATA.temperature}</span>
+              </div>
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                <span className="text-slate-400 uppercase text-[10px]">Rainfall Rate</span>
+                <span className="text-white font-bold block">{WEATHER_DATA.rainfallRate}</span>
+                <span className="text-slate-400 text-[10px]">Mumbai Regional avg</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* Recent Alerts Panel */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <Bell size={18} className="text-amber-400" />
+            <span>Recent Real-Time Alerts Stream</span>
+          </h3>
+          <button 
+            onClick={() => onNavigate("alerts")}
+            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            Manage All Alerts →
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {ALERTS.slice(0, 3).map((alert) => (
+            <div 
+              key={alert.id}
+              onClick={() => {
+                const found = DRAINS.find(d => d.id === alert.drainId);
+                if (found) onSelectDrain(found);
+              }}
+              className="bg-slate-950 border border-slate-800 hover:border-slate-700 p-4 rounded-xl cursor-pointer transition-all space-y-3"
+            >
+              <div className="flex justify-between items-center">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
+                  alert.severity === 'critical' ? 'bg-red-950 text-red-400 border border-red-500/30' :
+                  alert.severity === 'warning' ? 'bg-amber-950 text-amber-400 border border-amber-500/30' :
+                  'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
+                }`}>
+                  {alert.severity}
+                </span>
+                <span className="text-[10px] text-slate-500">{alert.time}</span>
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white mb-0.5">{alert.title}</h4>
+                <p className="text-xs text-slate-400 font-sans">{alert.drainId} — {alert.location}</p>
+              </div>
+              <div className="text-[11px] text-slate-300 font-sans border-t border-slate-900 pt-2">
+                {alert.description}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+// 2. DRAINS LIST VIEW COMPONENT
+function DrainsListView({ onSelectDrain, searchQuery, setSearchQuery, filter, setFilter }) {
+  const filteredDrains = DRAINS.filter(d => {
+    const matchesSearch = d.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          d.location.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesFilter = filter === 'all' || d.status === filter;
+    return matchesSearch && matchesFilter;
+  });
+
+  return (
+    <div className="space-y-6 animate-fadeIn">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-white tracking-tight">Municipal Drain Directory</h2>
+          <p className="text-slate-400 text-xs sm:text-sm">Comprehensive inventory of all IoT-monitored drainage conduits across Mumbai.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-400">Showing <strong className="text-white">{filteredDrains.length}</strong> drains</span>
+        </div>
+      </div>
+
+      {/* Search & Filter Controls */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 backdrop-blur-md flex flex-col sm:flex-row gap-4 items-center justify-between">
+        <div className="relative w-full sm:w-96">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+          <input
+            data-testid="drain-search-input"
+            type="text"
+            placeholder="Search drain ID or location (e.g. Malad, D-031)..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-10 pr-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+          {['all', 'healthy', 'warning', 'critical'].map((f) => (
+            <button
+              key={f}
+              data-testid={`filter-btn-${f}`}
+              onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all whitespace-nowrap ${
+                filter === f 
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' 
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Drains Table */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden backdrop-blur-md">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-800 text-slate-400 bg-slate-950/60">
+                <th className="p-4 font-semibold">Drain ID</th>
+                <th className="p-4 font-semibold">Location</th>
+                <th className="p-4 font-semibold">Health Score</th>
+                <th className="p-4 font-semibold">Water Level</th>
+                <th className="p-4 font-semibold">Flow Rate</th>
+                <th className="p-4 font-semibold">Status</th>
+                <th className="p-4 font-semibold">Last Update</th>
+                <th className="p-4 text-right font-semibold">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {filteredDrains.map((drain) => (
+                <tr 
+                  key={drain.id}
+                  data-testid={`drain-row-${drain.id}`}
+                  onClick={() => onSelectDrain(drain)}
+                  className="hover:bg-slate-800/50 transition-colors cursor-pointer"
+                >
+                  <td className="p-4 font-bold text-white">
+                    <div className="flex items-center gap-2">
+                      <span>{drain.id}</span>
+                      <span className="text-[9px] text-slate-500">[{drain.dataSource}]</span>
+                    </div>
+                  </td>
+                  <td className="p-4 text-slate-300">{drain.location}</td>
+                  <td className="p-4">
+                    <span className={`font-bold ${
+                      drain.healthScore < 50 ? 'text-red-400' : drain.healthScore < 70 ? 'text-amber-400' : 'text-emerald-400'
+                    }`}>
+                      {drain.healthScore}%
+                    </span>
+                  </td>
+                  <td className="p-4 text-slate-300">{drain.waterLevel} cm</td>
+                  <td className="p-4 text-slate-300">{drain.flowRate} L/min</td>
+                  <td className="p-4">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
+                      drain.status === 'critical' ? 'bg-red-950 text-red-400 border border-red-500/30' :
+                      drain.status === 'warning' ? 'bg-amber-950 text-amber-400 border border-amber-500/30' :
+                      'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
+                    }`}>
+                      {drain.status}
+                    </span>
+                  </td>
+                  <td className="p-4 text-slate-400">{drain.lastUpdated}</td>
+                  <td className="p-4 text-right">
+                    <span className="text-blue-400 hover:text-blue-300 font-semibold inline-flex items-center gap-1">
+                      <span>Inspect</span>
+                      <ChevronRight size={14} />
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {filteredDrains.length === 0 && (
+                <tr>
+                  <td colSpan="8" className="p-8 text-center text-slate-500">
+                    No drainage nodes matched your search parameters.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 3. DRAIN DETAIL VIEW COMPONENT
+function DrainDetailPage({ drain, onBack }) {
+  return (
+    <div className="space-y-8 animate-fadeIn">
+      
+      {/* Top Header with Back button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+        <div>
+          <button
+            data-testid="back-to-dashboard-btn"
+            onClick={onBack}
+            className="text-xs text-blue-400 hover:text-blue-300 mb-2 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            ← Back to Overview / List
+          </button>
+          <div className="flex items-center gap-3">
+            <h2 className="text-3xl font-extrabold text-white tracking-tight">{drain.id}</h2>
+            <span className="text-slate-400 text-lg">({drain.location}, Mumbai)</span>
+            <span className={`px-2.5 py-0.5 rounded text-xs uppercase font-bold tracking-wider ${
+              drain.status === 'critical' ? 'bg-red-950 text-red-400 border border-red-500/30' :
+              drain.status === 'warning' ? 'bg-amber-950 text-amber-400 border border-amber-500/30' :
+              'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
+            }`}>
+              ● {drain.status}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">Latitude: {drain.latitude} • Longitude: {drain.longitude} • Source: <strong className="text-slate-200">{drain.dataSource}</strong></p>
+        </div>
+
+        <div className="flex items-center gap-4 bg-slate-900/80 border border-slate-800 px-5 py-3 rounded-xl backdrop-blur-md">
+          <div>
+            <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Health Score</span>
+            <span className={`text-3xl font-black ${
+              drain.healthScore < 50 ? 'text-red-400' : drain.healthScore < 70 ? 'text-amber-400' : 'text-emerald-400'
+            }`}>
+              {drain.healthScore}%
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Grid: Sensor Data & ESP32-CAM */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* Left Side: Sensor Telemetry & Health Breakdown (7 cols) */}
+        <div className="lg:col-span-7 space-y-6">
+          
+          {/* Live Sensor Readings */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Activity size={18} className="text-blue-400" />
+              <span>Real-Time Sensor Telemetry</span>
+            </h3>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-[10px] text-slate-400 uppercase">Water Level</span>
+                <span className="text-2xl font-bold text-white block">{drain.waterLevel} cm</span>
+                <span className="text-[10px] text-cyan-400">Ultrasonic Node</span>
+              </div>
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-[10px] text-slate-400 uppercase">Flow Rate</span>
+                <span className="text-2xl font-bold text-white block">{drain.flowRate} L/min</span>
+                <span className="text-[10px] text-emerald-400">Velocity Sensor</span>
+              </div>
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-[10px] text-slate-400 uppercase">Node Status</span>
+                <span className="text-xl font-bold text-emerald-400 block">ONLINE</span>
+                <span className="text-[10px] text-slate-400">Heartbeat OK</span>
+              </div>
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-[10px] text-slate-400 uppercase">Last Update</span>
+                <span className="text-xl font-bold text-slate-200 block">{drain.lastUpdated}</span>
+                <span className="text-[10px] text-slate-400">Mesh Sync</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Module Health Detailed */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Cpu size={18} className="text-blue-400" />
+              <span>Hardware Module Health</span>
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-slate-400 block">Water Level Sensor</span>
+                  <span className="text-sm font-bold text-white">Ultrasonic HC-SR04</span>
+                </div>
+                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${drain.modules.waterLevelSensor === 'online' ? 'bg-emerald-950 text-emerald-400' : 'bg-red-950 text-red-400'}`}>
+                  ● {drain.modules.waterLevelSensor}
+                </span>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-slate-400 block">Flow Sensor</span>
+                  <span className="text-sm font-bold text-white">Hall Effect YF-S201</span>
+                </div>
+                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${drain.modules.flowSensor === 'online' ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'}`}>
+                  ● {drain.modules.flowSensor}
+                </span>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-slate-400 block">ESP32 Node</span>
+                  <span className="text-sm font-bold text-white">Microcontroller Core</span>
+                </div>
+                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${drain.modules.esp32 === 'online' ? 'bg-emerald-950 text-emerald-400' : 'bg-red-950 text-red-400'}`}>
+                  ● {drain.modules.esp32}
+                </span>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-slate-400 block">ESP32-CAM</span>
+                  <span className="text-sm font-bold text-white">Visual Verification Feed</span>
+                </div>
+                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${drain.modules.esp32Cam === 'online' ? 'bg-emerald-950 text-emerald-400' : drain.modules.esp32Cam === 'degraded' ? 'bg-amber-950 text-amber-400' : 'bg-red-950 text-red-400'}`}>
+                  ● {drain.modules.esp32Cam}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Health Score Contributing Breakdown */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <BarChart3 size={18} className="text-blue-400" />
+              <span>Health Score Contributing Factors</span>
+            </h3>
+
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-slate-300">Water Level Headroom (40% weight)</span>
+                  <span className="text-white font-bold">{Math.max(10, 100 - drain.waterLevel)}%</span>
+                </div>
+                <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+                  <div className="bg-blue-500 h-full rounded-full" style={{ width: `${Math.max(10, 100 - drain.waterLevel)}%` }}></div>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-slate-300">Flow Condition & Velocity (30% weight)</span>
+                  <span className="text-white font-bold">{Math.min(100, Math.round(drain.flowRate * 22))}%</span>
+                </div>
+                <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+                  <div className="bg-cyan-400 h-full rounded-full" style={{ width: `${Math.min(100, Math.round(drain.flowRate * 22))}%` }}></div>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-slate-300">Sensor Module Health (15% weight)</span>
+                  <span className="text-white font-bold">{drain.modules.flowSensor === 'degraded' ? '75%' : '100%'}</span>
+                </div>
+                <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+                  <div className="bg-emerald-500 h-full rounded-full" style={{ width: drain.modules.flowSensor === 'degraded' ? '75%' : '100%' }}></div>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-slate-300">Gateway Communication Link (15% weight)</span>
+                  <span className="text-white font-bold">100%</span>
+                </div>
+                <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+                  <div className="bg-emerald-500 h-full rounded-full" style={{ width: '100%' }}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Right Side: ESP32-CAM & 30-Day Trend (5 cols) */}
+        <div className="lg:col-span-5 space-y-6">
+          
+          {/* ESP32-CAM Visual Verification */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Camera size={18} className="text-blue-400" />
+                <span>ESP32-CAM Visual Verification</span>
+              </h3>
+              <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${drain.cameraStatus === 'READY' ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30' : 'bg-amber-950 text-amber-400 border border-amber-500/30'}`}>
+                ● {drain.cameraStatus}
+              </span>
+            </div>
+
+            <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950 aspect-video group">
+              <img 
+                src={drain.cameraImage} 
+                alt="ESP32-CAM Feed" 
+                className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-500"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent pointer-events-none" />
+              <div className="absolute bottom-3 left-3 right-3 flex justify-between items-end text-[11px]">
+                <span className="bg-slate-900/90 px-2 py-1 rounded text-slate-300 border border-slate-800">
+                  {drain.id} • LIVE CONDUIT VIEW
+                </span>
+                <span className="bg-slate-900/90 px-2 py-1 rounded text-cyan-400 font-mono border border-slate-800">
+                  Captured: {drain.capturedAt}
+                </span>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-400 font-sans">
+              Periodic still image capture transmitted via ESP32-CAM module to BMC municipal storage bucket.
+            </p>
+          </div>
+
+          {/* 30-Day Health History Chart */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <TrendingUp size={18} className="text-blue-400" />
+              <span>30-Day Drain Health Trend</span>
+            </h3>
+
+            <div className="h-[250px] w-full pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={drain.history30Days}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis dataKey="day" stroke="#64748b" fontSize={10} />
+                  <YAxis domain={[0, 100]} stroke="#64748b" fontSize={10} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: "#020617", borderColor: "#1e293b", borderRadius: "8px", fontSize: "12px", color: "#f8fafc" }}
+                  />
+                  <Line type="monotone" dataKey="health" stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6', r: 3 }} name="Health %" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="text-[11px] text-slate-400 font-sans">
+              Historical health degradation over 30 days based on ultrasonic water level and flow velocity metrics.
+            </p>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
+// 4. ANALYTICS VIEW COMPONENT
+function AnalyticsView() {
+  const pieData = [
+    { name: 'Healthy', value: SYSTEM_STATS.healthyCount, color: '#10b981' },
+    { name: 'Warning', value: SYSTEM_STATS.warningCount, color: '#f59e0b' },
+    { name: 'Critical', value: SYSTEM_STATS.criticalCount, color: '#ef4444' }
+  ];
+
+  const waterLevelTrendData = [
+    { time: '00:00', avgWater: 28, avgFlow: 3.8 },
+    { time: '04:00', avgWater: 32, avgFlow: 3.5 },
+    { time: '08:00', avgWater: 45, avgFlow: 2.9 },
+    { time: '12:00', avgWater: 58, avgFlow: 2.2 },
+    { time: '16:00', avgWater: 52, avgFlow: 2.5 },
+    { time: '20:00', avgWater: 40, avgFlow: 3.4 }
+  ];
+
+  return (
+    <div className="space-y-8 animate-fadeIn">
+      <div className="border-b border-slate-800 pb-6">
+        <h2 className="text-2xl font-bold text-white tracking-tight">Municipal Drainage Analytics</h2>
+        <p className="text-slate-400 text-xs sm:text-sm">Historical telemetry, health distributions, and regional flood risk trends.</p>
+      </div>
+
+      {/* Grid of Analytics Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        {/* Drain Health Distribution */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <BarChart3 size={18} className="text-blue-400" />
+            <span>Drain Health Distribution</span>
+          </h3>
+          <div className="h-[280px] w-full flex items-center justify-center">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={70}
+                  outerRadius={100}
+                  paddingAngle={5}
+                  dataKey="value"
+                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                >
+                  {pieData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#1e293b", borderRadius: "8px", fontSize: "12px", color: "#f8fafc" }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Water Level Trend */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <TrendingUp size={18} className="text-cyan-400" />
+            <span>Regional Water Level Trend (24h)</span>
+          </h3>
+          <div className="h-[280px] w-full pt-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={waterLevelTrendData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <XAxis dataKey="time" stroke="#64748b" fontSize={10} />
+                <YAxis stroke="#64748b" fontSize={10} />
+                <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#1e293b", borderRadius: "8px", fontSize: "12px", color: "#f8fafc" }} />
+                <Line type="monotone" dataKey="avgWater" stroke="#06b6d4" strokeWidth={2} name="Avg Water Level (cm)" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Flow Rate Trend */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <Activity size={18} className="text-emerald-400" />
+            <span>Flow Rate Velocity Trend (24h)</span>
+          </h3>
+          <div className="h-[280px] w-full pt-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={waterLevelTrendData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <XAxis dataKey="time" stroke="#64748b" fontSize={10} />
+                <YAxis stroke="#64748b" fontSize={10} />
+                <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#1e293b", borderRadius: "8px", fontSize: "12px", color: "#f8fafc" }} />
+                <Bar dataKey="avgFlow" fill="#10b981" name="Avg Flow Rate (L/min)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Rainfall Intensity Trend */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <CloudRain size={18} className="text-amber-400" />
+            <span>Monsoon Rainfall Intensity Trend</span>
+          </h3>
+          <div className="h-[280px] w-full pt-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={WEATHER_DATA.trend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <XAxis dataKey="time" stroke="#64748b" fontSize={10} />
+                <YAxis stroke="#64748b" fontSize={10} />
+                <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#1e293b", borderRadius: "8px", fontSize: "12px", color: "#f8fafc" }} />
+                <Line type="monotone" dataKey="mm" stroke="#f59e0b" strokeWidth={2} name="Rainfall (mm/hr)" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// 5. ALERTS VIEW COMPONENT
+function AlertsView({ onSelectDrain, filter, setFilter }) {
+  const filteredAlerts = ALERTS.filter(a => {
+    if (filter === 'all') return true;
+    return a.severity === filter;
+  });
+
+  return (
+    <div className="space-y-6 animate-fadeIn">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-white tracking-tight">Municipal Alert Management</h2>
+          <p className="text-slate-400 text-xs sm:text-sm">Real-time alerts generated by ESP32 sensor threshold exceedances.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {['all', 'critical', 'warning', 'resolved'].map((f) => (
+            <button
+              key={f}
+              data-testid={`alert-filter-${f}`}
+              onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all ${
+                filter === f 
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' 
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4">
+        {filteredAlerts.map((alert) => (
+          <div 
+            key={alert.id}
+            data-testid={`alert-card-${alert.id}`}
+            onClick={() => onSelectDrain(alert.drainId)}
+            className="bg-slate-900/80 border border-slate-800 hover:border-slate-700 rounded-xl p-5 backdrop-blur-md cursor-pointer transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          >
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
+                  alert.severity === 'critical' ? 'bg-red-950 text-red-400 border border-red-500/30' :
+                  alert.severity === 'warning' ? 'bg-amber-950 text-amber-400 border border-amber-500/30' :
+                  'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
+                }`}>
+                  {alert.severity}
+                </span>
+                <span className="text-xs font-bold text-white">{alert.drainId} — {alert.location}, Mumbai</span>
+                <span className="text-xs text-slate-500">{alert.time}</span>
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-100">{alert.title}</h4>
+                <p className="text-xs text-slate-400 font-sans mt-0.5">{alert.description}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 self-end sm:self-center">
+              <span className="text-xs text-blue-400 font-semibold hover:underline flex items-center gap-1">
+                <span>Inspect Drain</span>
+                <ArrowRight size={14} />
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
