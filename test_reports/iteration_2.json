@@ -1,0 +1,74 @@
+{
+  "summary": "Frontend-only review completed against the public URL. Build and all requested prototype flows passed: mocked login, dark/light persistence, dashboard prototype nodes, Leaflet live/demo markers, pending drain details, drains search/filter, alerts filters, analytics rendering, footer state, logout, and desktop/mobile navigation. Issues remain in mobile toast interaction, light-theme toast styling, analytics console warnings, and Firebase listener cleanup for the future configured mode.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Mobile success toast / sticky navigation",
+        "issue": "After login at 390x844, the success toast overlays the mobile navigation. A normal click on Analytics was intercepted for the full 30-second Playwright action timeout because the pointer remained over the toast and paused dismissal. Navigation works after moving the pointer away and waiting for the toast to close.",
+        "selector": "[data-sonner-toast] over header .md\\:hidden",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Light-theme success toast",
+        "issue": "The shell Toaster is hardcoded to theme='dark'. In light mode the success toast computed background is rgb(0, 0, 0), so it does not follow the selected application theme.",
+        "selector": "[data-sonner-toast]",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Firebase listener unmount cleanup",
+        "issue": "Static review found subscribeDrain, subscribeDrainHistory, and subscribeAlerts store the unsubscribe function returned by onValue(), then incorrectly pass that function to off() as though it were the registered value callback. In configured Firebase mode this can leave listeners attached across navigation/unmount. Runtime verification was not possible because Firebase is intentionally unconfigured.",
+        "affected_selectors": ["[data-testid='nav-dashboard']", "[data-testid='nav-drains']", "[data-testid='nav-analytics']", "[data-testid='nav-alerts']"]
+      },
+      {
+        "flow": "Analytics navigation/render",
+        "issue": "Opening Analytics renders all four charts, but emits eight Recharts warnings that ResponsiveContainer width(-1) and height(-1) must be greater than zero.",
+        "affected_selectors": ["[data-testid='nav-analytics']", ".recharts-responsive-container"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Mobile tab navigation",
+        "issues": [
+          "Tab changes retain the prior page scroll offset; returning to Dashboard can land mid-content instead of at the prototype banner/overview.",
+          "Mobile navigation buttons have no data-testid attributes even though they are separate interactive controls from the desktop navigation."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Move/reposition the mobile login toast so it cannot cover the sticky mobile navigation, or ensure pointer events do not block controls beneath it.",
+    "Pass the active theme to the authenticated-shell Toaster instead of hardcoding theme='dark'.",
+    "Return and invoke onValue()'s unsubscribe callback directly in drainService and alertService; retest listener cleanup with configured Firebase.",
+    "Eliminate Recharts -1 dimension warnings by giving responsive chart parents valid minimum dimensions/initial sizing.",
+    "Reset scroll to the top when switching primary tabs on mobile.",
+    "Split App.js into focused view/components and add unique data-testid attributes to the separate mobile navigation controls."
+  ],
+  "critical_code_review_comments": [
+    "App.js is 1,455 lines, above the 700-line maintainability limit; extract Login, Shell, Dashboard, DrainDetail, DrainsList, Analytics, and Alerts into focused modules.",
+    "Firebase onValue() returns an unsubscribe callback. services/drainService.js and services/alertService.js currently call off(ref, 'value', listener) where listener is actually that unsubscribe callback; cleanup should invoke the returned callback.",
+    "Drain detail stores a selected drain object snapshot in state and does not use useRealtimeTelemetry. When Firebase is enabled, telemetry updates can refresh DRAINS while an already-open detail page remains stale.",
+    "useAlerts falls back to DEMO_ALERTS when Firebase returns a legitimate empty live alert list, which would display fake alerts in live mode.",
+    "isFirebaseConfigured remains true even if initializeApp/getDatabase throws, so the shell can claim FIREBASE LIVE despite failed initialization.",
+    "The existing /app/backend/tests/frontend_test.py is stale: it hardcodes localhost, uses force clicks, references missing analytics-view/drain-detail-view/back-to-drains-btn selectors, and defines run(page) without executing it. It should not be treated as a valid regression result."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_2.json"
+  ],
+  "success_rate": {
+    "backend": "N/A (frontend-only, no backend by design)",
+    "frontend": "88%"
+  },
+  "seed_data_creation": "None. Used the existing client-side demo data and K-01/K-02/K-03 pending prototype nodes.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Read /app/memory/test_credentials.md and used the pre-filled mocked BMC-OPS-4091 login; no real authentication was performed.",
+  "context_for_next_testing_agent": "Retest mobile login at 390x844 with normal (non-force) clicks immediately after the success toast appears. Also retest Firebase unsubscribe behavior only when a safe configured RTDB test environment is available. Desktop requested flows passed; both K-03 pending and D-031 Malad map popups were opened successfully.",
+  "rca_of_the_issue": "Mobile obstruction and light-toast mismatch both originate from the authenticated shell's top-right Sonner Toaster, which is hardcoded dark and rendered over the sticky header. The Firebase cleanup defect comes from confusing onValue()'s returned unsubscribe function with the callback argument expected by off(). Analytics warnings occur during ResponsiveContainer's initial measurement at invalid -1 dimensions."
+}
