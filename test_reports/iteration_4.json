@@ -1,0 +1,59 @@
+{
+  "summary": "Frontend-only iteration-4 retest on the public UTC-browser URL. The temporal service fixes passed deterministic tests: weather slices from the current hour, IST tide timestamps remain future-only, and a 0.73 m to -0.09 m adjacent-hour change is FALLING. Login, dashboard placement, theme switching, K-01/02/03 cards/details/map popups, DEMO exclusion, metadata markup, no-fake-data check, and one-weather/one-marine request count passed. Critical integration regression: StrictMode aborts that single shared in-flight request, so both real cards, tide timestamps, Analytics environmental chart, alerts, and failure isolation are unavailable at runtime. Analytics also still emitted 6 ResponsiveContainer -1-dimension warnings.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Live drain Environmental Conditions footer",
+        "issue": "The K-* detail footer has Weather/Tide attribution and Updated fields, but does not include the explicitly required literal 'Sources:' label. With the fetch regression, Updated renders as — rather than an '... ago' timestamp.",
+        "selector": "[data-testid^='drain-env-section-']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Initial authentic weather/tide load under React StrictMode",
+        "issue": "A polling cycle now issues exactly one weather and one marine request, but StrictMode's first effect cleanup aborts both. The second mount reuses the same aborted in-flight promises, so both cards remain UNAVAILABLE. Browser logs show net::ERR_ABORTED for both requests. Weather-only and marine-only 500 isolation retests consequently fail because the supposedly independent source is also unavailable.",
+        "affected_selectors": ["[data-testid='env-weather-card']", "[data-testid='env-tide-card']", "[data-testid='env-impact-level']", "[data-testid='env-rainfall-trend']", "[data-testid^='drain-env-section-']"]
+      },
+      {
+        "flow": "Analytics environmental chart and Recharts sizing",
+        "issue": "Environmental Conditions Trend renders WEATHER DATA UNAVAILABLE with no x-axis labels because of the aborted weather request. Opening Analytics still emits 6 ResponsiveContainer width(-1)/height(-1) warnings despite minHeight={200}.",
+        "affected_selectors": ["[data-testid='nav-analytics']", "[data-testid='env-rainfall-trend']", ".recharts-responsive-container"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/frontend/src/services/environmentServices.test.js"
+  ],
+  "action_items": [
+    "Fix in-flight dedup cancellation ownership: a StrictMode cleanup must not abort the one shared network operation that the remount reuses. Preserve exactly one request while allowing the second consumer to receive its successful result.",
+    "Retest actual UTC-browser Analytics labels and next tide values after live data is restored; service-level temporal tests pass, but runtime verification is blocked.",
+    "Fix ResponsiveContainer initial width/height measurement; minHeight alone did not remove the 6 warnings.",
+    "Add the literal Sources: footer label to K-* drain Environmental Conditions sections and ensure successful loads show an 'Updated: ... ago' value."
+  ],
+  "critical_code_review_comments": [
+    "RCA: weatherService/tideService cache a promise created with the first component mount's AbortSignal. useEnvironment cleanup aborts that signal; the StrictMode remount receives the cached aborted promise instead of live data. Request deduplication therefore reduced network count but broke all environmental runtime data.",
+    "App.js is 1,867 lines, well above the 700-line threshold; extract environmental dashboard/detail/analytics/alerts components.",
+    "useEnvironment still mounts and starts external API polling before mocked authentication succeeds; environmental traffic is not scoped to the dashboard session.",
+    "The env-impact-level data-testid is on the small impact badge, not the Prototype Risk Model container that owns Sources/Updated metadata, reducing selector correctness for the requested footer check."
+  ],
+  "updated_files": [
+    "/app/frontend/src/services/environmentServices.test.js",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {
+    "backend": "N/A (frontend-only; no backend by design)",
+    "frontend": "68%"
+  },
+  "seed_data_creation": "None. Used real public Open-Meteo requests plus temporary Playwright 500 interception; deterministic service tests used local mocked payloads only.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Read /app/memory/test_credentials.md and used the pre-filled mocked BMC-OPS-4091 flow; no real authentication was performed.",
+  "context_for_next_testing_agent": "First verify a fresh public load has exactly one successful weather and one successful marine request (not net::ERR_ABORTED) and that both source cards show LIVE values. Then in UTC verify six Analytics labels begin at current IST hour, tide high/low humanized values are future/non-zero, and the live trend matches adjacent marine points. Re-run both one-source 500 isolation cases and deterministic high-rain alert badge/source checks. Temporal Jest tests currently pass; runtime checks are blocked only by the abort/dedup integration regression.",
+  "rca_of_the_issue": "React StrictMode runs setup → cleanup → setup. useEnvironment's first cleanup aborts its controller. Both services stored fetch promises tied to that first signal and return those same promises to the second setup for 5 seconds. Thus there is exactly one request per API, but it is aborted and both consumers receive null. Reproduction: fresh public load in UTC, authenticate, observe both cards UNAVAILABLE and net::ERR_ABORTED logs; network count is one weather plus one marine."
+}

@@ -1,0 +1,68 @@
+{
+  "summary": "Frontend-only public-URL testing completed for authentic weather/tide flood impact. Login, dashboard placement/cards, real API rendering, K-01/K-02/K-03 pending states and details, DEMO exclusion, environmental alert rendering/dedup, theme switching, API failure isolation, navigation, analytics rendering, map rendering, and logout worked. Core data-correctness defects remain: the weather 'next 6h' series is the day's first six hours, tide calculations use incorrectly parsed local timestamps and a wrong trend fallback, and a clean development-mode load initiates four Open-Meteo fetches instead of two.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Environmental source attribution/timestamps",
+        "issue": "Weather and Tide cards show source/updated metadata, but the Prototype Risk Model, per-node environmental cards, and live drain Environmental Conditions section do not show an explicit update timestamp; this does not satisfy the requirement to show sources and timestamps on every environmental card.",
+        "selector": "[data-testid='env-impact-level'], [data-testid^='env-node-'], [data-testid^='drain-env-section-']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Weather next-6-hour forecast, risk score, alerts, and Analytics trend",
+        "issue": "weatherService slices hourly precipitation at indexes 0..5 instead of locating the current hour. The tested API response had current time 2026-08-12T00:15 while the returned one-day hourly series was 2026-08-11T00:00..23:00; the UI still plotted 00:00..05:00 and called it the next 6 hours. Forecast peak, prototype risk, contextual alerts, detail forecast, and Analytics can therefore use historical/wrong hours.",
+        "affected_selectors": ["[data-testid='env-weather-card']", "[data-testid='env-impact-level']", "[data-testid='env-rainfall-trend']", "[data-testid^='drain-env-section-']"]
+      },
+      {
+        "flow": "Tide trend, next high/low tide, flood score, and environmental alerts",
+        "issue": "Open-Meteo Marine returns Asia/Kolkata wall-clock strings without offsets, but tideService passes them to Date.parse, so users/browsers outside IST interpret them in their own timezone. In the tested UTC browser, a past 22:00 IST high tide was displayed as next high tide in about 3 hours. Also current.time is quarter-hour (00:15) and never exactly matches hourly times, so trend falls back to heights[0] (start of forecast) rather than an adjacent hour; UI showed RISING although the next hourly sea level was falling from 0.73 m to -0.09 m. This can produce false risk levels and alerts.",
+        "affected_selectors": ["[data-testid='env-tide-card']", "[data-testid='env-impact-level']", "[data-testid^='drain-env-section-']", "[data-testid^='alert-card-env-']"]
+      },
+      {
+        "flow": "Environmental API polling/request count",
+        "issue": "A clean public-app reload initiated four request events (weather, marine, weather, marine), not the required total of two. React StrictMode remounts the effect; useEnvironment aborts the first pair and immediately starts a second pair. The hook also fetches while the login screen is displayed, before dashboard authentication.",
+        "affected_selectors": ["[data-testid='authenticate-btn']", "[data-testid='env-weather-card']", "[data-testid='env-tide-card']"]
+      },
+      {
+        "flow": "Analytics chart rendering",
+        "issue": "Opening Analytics still emits ten Recharts warnings that ResponsiveContainer width(-1) and height(-1) must be greater than zero.",
+        "affected_selectors": ["[data-testid='nav-analytics']", ".recharts-responsive-container"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Build the weather forecast window from the hourly timestamp at/after current time (or request forecast_hours=6) instead of slice(0, 6); use that corrected series everywhere risk, alerts, detail, and Analytics consume it.",
+    "Parse Open-Meteo Asia/Kolkata timestamps timezone-safely and calculate trend from the nearest adjacent forecast points rather than exact timestamp equality/fallback to index 0.",
+    "Prevent StrictMode effect remounts from issuing duplicate Open-Meteo calls, and guard environmental fetching until the authenticated dashboard is active if calls are intended to begin on dashboard load.",
+    "Remove the unused WEATHER_DATA import and hardcoded fake weather object from mock.js.",
+    "Add explicit source and updated metadata to the Prototype Risk Model, per-node cards, and live drain environmental section.",
+    "Fix ResponsiveContainer initial sizing warnings."
+  ],
+  "critical_code_review_comments": [
+    "App.js is now 1,857 lines, far over the 700-line maintainability threshold; extract environmental dashboard/detail/analytics/alerts components into focused files.",
+    "The original no-fake-weather requirement is not fully met: mock.js still contains Heavy Monsoon Shower / 18 mm/hr WEATHER_DATA and App.js still imports it, although runtime testing confirmed those values are not rendered.",
+    "useEnvironment is mounted at App level before login, so public environmental traffic and polling lifecycle are independent of dashboard authentication.",
+    "The risk model and alert correctness depends on forecast and tide temporal alignment; authentic API values are insufficient if their local timestamps are indexed/parsed incorrectly."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": {
+    "backend": "N/A (frontend-only; no backend by design)",
+    "frontend": "78%"
+  },
+  "seed_data_creation": "None. Used real Open-Meteo responses; transient Playwright route responses were used only to verify independent 500 handling and deterministic high-rain environmental alerts.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Read /app/memory/test_credentials.md and used the pre-filled mocked BMC-OPS-4091 flow; no real authentication was performed.",
+  "context_for_next_testing_agent": "Retest temporal correctness with a non-IST browser timezone and inspect raw API hourly timestamps against displayed Analytics labels. On a clean reload, attach request listeners after the initial page settles, clear counts, reload, and expect exactly one weather plus one marine request. Current real conditions did not trigger environmental alerts, so high-rain/tide rendering was verified with temporary route interception: exactly two deduplicated city-wide alerts appeared with ENV · Prototype badges and source footers. Weather-only and marine-only 500 interception both degraded independently without crashing.",
+  "rca_of_the_issue": "Weather temporal RCA: weatherService.js uses hourly arrays' first six entries rather than a current-time-aligned window. Tide temporal RCA: timezone-less Asia/Kolkata strings are parsed in the browser timezone, and the 15-minute current timestamp cannot equal hourly timestamps, forcing a comparison against the first forecast value. Duplicate-call RCA: React.StrictMode remounts useEnvironment's effect; each mount immediately invokes load(), creating an aborted pair plus a completed pair. Legacy fake values remain because WEATHER_DATA was not removed after consumers migrated."
+}

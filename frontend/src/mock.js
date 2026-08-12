@@ -358,17 +358,5 @@ export const SYSTEM_STATS = {
   lastSync: "12s ago"
 };
 
-export const WEATHER_DATA = {
-  condition: "Heavy Monsoon Shower",
-  temperature: "28°C",
-  rainfallRate: "18 mm/hr",
-  floodRisk: "HIGH",
-  trend: [
-    { time: "06:00", mm: 2 },
-    { time: "09:00", mm: 5 },
-    { time: "12:00", mm: 14 },
-    { time: "15:00", mm: 18 },
-    { time: "18:00", mm: 12 },
-    { time: "21:00", mm: 8 }
-  ]
-};
+// WEATHER_DATA removed — the app now consumes REAL Open-Meteo data via
+// /app/frontend/src/services/weatherService.js.

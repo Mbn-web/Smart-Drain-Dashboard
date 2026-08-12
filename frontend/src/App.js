@@ -7,10 +7,18 @@ import {
   ChevronRight, RadioTower, Globe, Sun, Moon, Wifi
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
-import { SYSTEM_STATS, WEATHER_DATA } from "./mock";
+import { SYSTEM_STATS } from "./mock";
 import { useDrains } from "./hooks/useDrains";
 import { useAlerts } from "./hooks/useAlerts";
 import { useTheme } from "./hooks/useTheme";
+import { useEnvironment } from "./hooks/useEnvironment";
+import { useEnvironmentalAlerts } from "./hooks/useEnvironmentalAlerts";
+import {
+  computeEnvironmentalImpact, computeDrainRisk,
+  categoriseRainfall, categoriseTide,
+  fmtMm, fmtCm, fmtLpm, fmtSeaLevel,
+  riskBadgeClasses,
+} from "./services/environmentService";
 import { isFirebaseConfigured } from "./firebase/config";
 import { LIVE_PROTOTYPE_DRAIN_IDS } from "./data/livePrototypeDrains";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
@@ -91,6 +99,22 @@ export default function App() {
   // when Firebase env vars are not configured — see /src/firebase/config.js)
   const { drains: DRAINS, stats: liveStats } = useDrains();
   const { alerts: ALERTS } = useAlerts();
+
+  // Authentic environmental data (Open-Meteo weather + tide APIs, polled
+  // every 10 min) and contextual environmental alerts derived from real
+  // weather + tide + Firebase telemetry.
+  const environment = useEnvironment();
+  const { environmentalAlerts } = useEnvironmentalAlerts({
+    drains: DRAINS,
+    weather: environment.weather,
+    tide: environment.tide,
+  });
+  // Merge environmental alerts with Firebase/demo alerts (newest first)
+  const combinedAlerts = [...environmentalAlerts, ...ALERTS];
+  const envImpact = computeEnvironmentalImpact({
+    weather: environment.weather,
+    tide: environment.tide,
+  });
 
   // Login form state
   const [employeeId, setEmployeeId] = useState("BMC-OPS-4091");
@@ -393,15 +417,22 @@ export default function App() {
         
         {/* If a drain is selected, render Drain Detail Page */}
         {selectedDrain ? (
-          <DrainDetailPage drain={selectedDrain} onBack={() => setSelectedDrain(null)} />
+          <DrainDetailPage 
+            drain={selectedDrain} 
+            onBack={() => setSelectedDrain(null)}
+            environment={environment}
+            envImpact={envImpact}
+          />
         ) : (
           <>
             {/* Dashboard View */}
             {activeTab === "dashboard" && (
               <DashboardView 
                 drains={DRAINS}
-                alerts={ALERTS}
+                alerts={combinedAlerts}
                 liveStats={liveStats}
+                environment={environment}
+                envImpact={envImpact}
                 onSelectDrain={(d) => setSelectedDrain(d)} 
                 onNavigate={(tab) => setActiveTab(tab)}
                 isLight={isLight}
@@ -423,13 +454,13 @@ export default function App() {
 
             {/* Analytics View */}
             {activeTab === "analytics" && (
-              <AnalyticsView drains={DRAINS} liveStats={liveStats} isLight={isLight} />
+              <AnalyticsView drains={DRAINS} liveStats={liveStats} environment={environment} isLight={isLight} />
             )}
 
             {/* Alerts View */}
             {activeTab === "alerts" && (
               <AlertsView 
-                alerts={ALERTS}
+                alerts={combinedAlerts}
                 onSelectDrain={(drainId) => {
                   const found = DRAINS.find(d => d.id === drainId);
                   if (found) setSelectedDrain(found);
@@ -474,8 +505,226 @@ export default function App() {
   );
 }
 
+// ─── ENVIRONMENTAL FLOOD IMPACT ─────────────────────────────────────
+// Prototype indicator combining REAL Open-Meteo weather + tide data
+// with the REAL Firebase drain telemetry for K-01/K-02/K-03. This is
+// NOT an official BMC forecast — the UI labels it as such.
+
+function EnvironmentalFloodImpact({ environment, envImpact, drains, isLight }) {
+  const { weather, tide, weatherStale, tideStale, lastWeatherAt, lastTideAt } = environment;
+
+  const surface = isLight ? 'bg-white border-slate-200 shadow-md' : 'bg-slate-900/80 border-slate-800';
+  const innerSurface = isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800';
+
+  const liveDrains = drains.filter(d => d.isLive);
+
+  return (
+    <div className={`${surface} border rounded-xl p-6 backdrop-blur-md space-y-5`}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'} flex items-center gap-2`}>
+            <CloudRain size={18} className="text-cyan-400" />
+            <span>Environmental Flood Impact</span>
+            <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded ${isLight ? 'bg-slate-100 text-slate-600 border border-slate-300' : 'bg-slate-950 text-slate-400 border border-slate-800'}`}>
+              AI Flood Impact — Prototype
+            </span>
+          </h3>
+          <p className="text-[11px] text-slate-500 font-sans">
+            Prototype risk model combining Open-Meteo weather &amp; tide with live ESP32 telemetry. Not an official forecast.
+          </p>
+        </div>
+        <div className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider ${riskBadgeClasses(envImpact.level)}`} data-testid="env-impact-level">
+          Impact: {envImpact.level}
+        </div>
+      </div>
+
+      {/* Weather + Tide + Impact grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <EnvSourceCard
+          title="Weather"
+          data={weather}
+          stale={weatherStale}
+          lastAt={lastWeatherAt}
+          unavailableMsg="WEATHER DATA UNAVAILABLE"
+          isLight={isLight}
+          surface={innerSurface}
+          testId="env-weather-card"
+          renderBody={(w) => (
+            <div className="space-y-2 text-xs">
+              <Row label="Condition" value={w.current.condition || '—'} />
+              <Row label="Temperature" value={w.current.temperatureC !== null ? `${w.current.temperatureC.toFixed(1)} °C` : '—'} />
+              <Row label="Rainfall" value={fmtMm(w.current.rainfallMm)} strong />
+              <Row label="Forecast peak (6 h)" value={fmtMm(w.forecast.peakNext6hMm)} />
+              {w.forecast.avgProbabilityNext6h !== null && (
+                <Row label="Probability" value={`${w.forecast.avgProbabilityNext6h}%`} />
+              )}
+            </div>
+          )}
+        />
+
+        <EnvSourceCard
+          title="Tide / Sea Level"
+          data={tide}
+          stale={tideStale}
+          lastAt={lastTideAt}
+          unavailableMsg="TIDE DATA UNAVAILABLE"
+          isLight={isLight}
+          surface={innerSurface}
+          testId="env-tide-card"
+          renderBody={(t) => (
+            <div className="space-y-2 text-xs">
+              <Row label="Sea level (MSL)" value={fmtSeaLevel(t.current.seaLevelM)} strong />
+              <Row label="Trend" value={(t.current.trend || 'unknown').toUpperCase()} />
+              {t.next.high && (
+                <Row label="Next high tide" value={`${fmtSeaLevel(t.next.high.seaLevelM)} · ${t.next.high.in}`} />
+              )}
+              {t.next.low && (
+                <Row label="Next low tide" value={`${fmtSeaLevel(t.next.low.seaLevelM)} · ${t.next.low.in}`} />
+              )}
+            </div>
+          )}
+        />
+
+        <div className={`${innerSurface} border rounded-lg p-4 space-y-2`}>
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold uppercase tracking-wider ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Prototype Risk Model</span>
+            <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded ${isLight ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-blue-950/50 text-blue-300 border border-blue-500/30'}`}>Kurla</span>
+          </div>
+          <div className={`text-3xl font-black ${riskColorForLevel(envImpact.level)}`}>
+            {envImpact.level.toUpperCase()}
+          </div>
+          <div className={`text-[11px] font-sans ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+            Derived from{' '}
+            <strong>{weather ? 'live rainfall' : 'no rainfall data'}</strong> and{' '}
+            <strong>{tide ? 'live tide' : 'no tide data'}</strong>. Score:{' '}
+            <strong>{envImpact.score !== null ? envImpact.score : '—'}</strong>.
+          </div>
+          <div className={`text-[10px] italic ${isLight ? 'text-slate-500' : 'text-slate-500'}`}>
+            Not scientifically validated · Prototype indicator only.
+          </div>
+          <div className={`flex flex-col text-[9px] pt-2 border-t ${isLight ? 'border-slate-200' : 'border-slate-800'} space-y-0.5`}>
+            <span className="text-slate-500">Sources: <strong className={isLight ? 'text-slate-700' : 'text-slate-300'}>{[weather && 'Open-Meteo', tide && (tide.source)].filter(Boolean).join(' · ') || '—'}</strong></span>
+            <span className="text-slate-500">Updated: <strong className={isLight ? 'text-slate-700' : 'text-slate-300'}>{Math.max(lastWeatherAt || 0, lastTideAt || 0) ? relativeAgo(Math.max(lastWeatherAt || 0, lastTideAt || 0)) : '—'}</strong></span>
+          </div>
+        </div>
+      </div>
+
+      {/* Live drains × environmental cross-signal (K-01/02/03 only) */}
+      {liveDrains.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className={`text-xs font-bold uppercase tracking-wider ${isLight ? 'text-blue-700' : 'text-blue-300'} flex items-center gap-2`}>
+              <RadioTower size={12} /> Live Nodes × Environment
+            </h4>
+            <span className="text-[10px] text-slate-500">Water level &amp; flow rate from Firebase · Rainfall &amp; tide from APIs</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {liveDrains.map(d => (
+              <LiveNodeEnvCard
+                key={d.id}
+                drain={d}
+                envImpact={envImpact}
+                weather={weather}
+                tide={tide}
+                isLight={isLight}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveNodeEnvCard({ drain, envImpact, weather, tide, isLight }) {
+  const risk = computeDrainRisk({ drain, envImpact });
+  const surface = isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800';
+  const latestFetch = Math.max(weather?.fetchedAt || 0, tide?.fetchedAt || 0);
+  return (
+    <div className={`${surface} border rounded-lg p-3 space-y-2`} data-testid={`env-node-${drain.id}`}>
+      <div className="flex items-center justify-between">
+        <span className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{drain.id} — {drain.location.split(',')[0]}</span>
+        <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase font-bold ${riskBadgeClasses(risk.level)}`}>
+          Risk: {risk.level}
+        </span>
+      </div>
+      {drain.awaitingDeployment ? (
+        <div className="text-[10px] text-blue-400 pending-pulse">AWAITING SENSOR DEPLOYMENT</div>
+      ) : (
+        <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+          <Row compact label="Water Level" value={fmtCm(drain.waterLevel)} />
+          <Row compact label="Flow Rate" value={fmtLpm(drain.flowRate)} />
+          <Row compact label="Rainfall" value={weather ? fmtMm(weather.current.rainfallMm) : '—'} />
+          <Row compact label="Tide" value={tide ? (tide.current.trend || 'unknown').toUpperCase() : '—'} />
+        </div>
+      )}
+      <div className={`flex justify-between items-center text-[9px] pt-1 border-t ${isLight ? 'border-slate-200' : 'border-slate-800'}`}>
+        <span className="text-slate-500">Env Impact:</span>
+        <span className={`font-bold ${riskColorForLevel(envImpact.level)}`}>{envImpact.level.toUpperCase()}</span>
+      </div>
+      <div className="flex justify-between items-center text-[9px] text-slate-500">
+        <span>Sources: <strong className={isLight ? 'text-slate-700' : 'text-slate-400'}>Firebase · Open-Meteo{tide ? ` · ${tide.source}` : ''}</strong></span>
+        <span>Updated: <strong className={isLight ? 'text-slate-700' : 'text-slate-400'}>{latestFetch ? relativeAgo(latestFetch) : '—'}</strong></span>
+      </div>
+    </div>
+  );
+}
+
+function EnvSourceCard({ title, data, stale, lastAt, unavailableMsg, isLight, surface, testId, renderBody }) {
+  const badge = data ? (stale ? { text: 'STALE', cls: 'bg-amber-950 text-amber-400 border border-amber-500/30' } : { text: 'LIVE', cls: 'bg-emerald-950 text-emerald-400 border border-emerald-500/30' }) : { text: 'UNAVAILABLE', cls: 'bg-red-950 text-red-400 border border-red-500/30' };
+
+  return (
+    <div className={`${surface} border rounded-lg p-4 space-y-3`} data-testid={testId}>
+      <div className="flex items-center justify-between">
+        <span className={`text-[11px] font-bold uppercase tracking-wider ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{title}</span>
+        <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase font-bold ${badge.cls}`}>{badge.text}</span>
+      </div>
+      {data ? renderBody(data) : (
+        <div className="text-xs text-red-400 font-bold py-3">
+          {unavailableMsg}
+        </div>
+      )}
+      <div className={`flex flex-col text-[9px] pt-2 border-t ${isLight ? 'border-slate-200' : 'border-slate-800'} space-y-0.5`}>
+        <span className="text-slate-500">Source: <strong className={isLight ? 'text-slate-700' : 'text-slate-300'}>{data ? data.source : '—'}</strong></span>
+        <span className="text-slate-500">Updated: <strong className={isLight ? 'text-slate-700' : 'text-slate-300'}>{lastAt ? relativeAgo(lastAt) : '—'}</strong></span>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value, strong = false, compact = false }) {
+  return (
+    <div className={`flex justify-between items-center ${compact ? '' : ''}`}>
+      <span className="text-slate-500">{label}</span>
+      <span className={strong ? 'text-cyan-400 font-bold' : 'text-slate-200 font-semibold'}>{value}</span>
+    </div>
+  );
+}
+
+function riskColorForLevel(level) {
+  switch (level) {
+    case 'critical': return 'text-red-400';
+    case 'high': return 'text-amber-400';
+    case 'moderate': return 'text-yellow-400';
+    case 'low': return 'text-emerald-400';
+    default: return 'text-slate-400';
+  }
+}
+
+function relativeAgo(ts) {
+  if (!ts) return '—';
+  const diff = Math.max(0, Date.now() - ts);
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr} h ago`;
+}
+
+
 // 1. DASHBOARD VIEW COMPONENT
-function DashboardView({ drains, alerts, liveStats, onSelectDrain, onNavigate, isLight }) {
+function DashboardView({ drains, alerts, liveStats, environment, envImpact, onSelectDrain, onNavigate, isLight }) {
   const liveNodes = drains.filter(d => d.isLive);
   const liveOnline = liveNodes.filter(d => !d.awaitingDeployment).length;
   return (
@@ -574,6 +823,15 @@ function DashboardView({ drains, alerts, liveStats, onSelectDrain, onNavigate, i
         </div>
 
       </div>
+
+      {/* ENVIRONMENTAL FLOOD IMPACT SECTION (Open-Meteo weather + tide) */}
+      <EnvironmentalFloodImpact
+        environment={environment}
+        envImpact={envImpact}
+        drains={drains}
+        isLight={isLight}
+      />
+
 
       {/* GIS MAP SECTION (Leaflet) */}
       <div className={`${isLight ? 'bg-white border-slate-300 shadow-xl' : 'bg-slate-900/80 border-slate-800 shadow-xl'} border rounded-xl p-6 backdrop-blur-md space-y-4`}>
@@ -785,30 +1043,36 @@ function DashboardView({ drains, alerts, liveStats, onSelectDrain, onNavigate, i
             </div>
           </div>
 
-          {/* Weather & Rainfall Card */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
+          {/* Weather & Rainfall Card — REAL Open-Meteo data */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4" data-testid="dashboard-weather-card">
             <div className="flex justify-between items-center">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <CloudRain size={18} className="text-cyan-400" />
-                <span>Monsoon & Rainfall Status</span>
+                <span>Monsoon &amp; Rainfall Status</span>
               </h3>
-              <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-red-950 text-red-400 border border-red-500/30">
-                Flood Risk: HIGH
+              <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${riskBadgeClasses(envImpact.level)}`}>
+                Flood Impact: {envImpact.level}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 text-xs">
-              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
-                <span className="text-slate-400 uppercase text-[10px]">Condition</span>
-                <span className="text-white font-bold block">{WEATHER_DATA.condition}</span>
-                <span className="text-cyan-400 text-[10px]">Temp: {WEATHER_DATA.temperature}</span>
+            {environment.weather ? (
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                  <span className="text-slate-400 uppercase text-[10px]">Condition</span>
+                  <span className="text-white font-bold block">{environment.weather.current.condition}</span>
+                  <span className="text-cyan-400 text-[10px]">
+                    Temp: {environment.weather.current.temperatureC !== null ? `${environment.weather.current.temperatureC.toFixed(1)} °C` : '—'}
+                  </span>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                  <span className="text-slate-400 uppercase text-[10px]">Rainfall Rate</span>
+                  <span className="text-white font-bold block">{fmtMm(environment.weather.current.rainfallMm)}</span>
+                  <span className="text-slate-400 text-[10px]">Source: Open-Meteo · Kurla</span>
+                </div>
               </div>
-              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
-                <span className="text-slate-400 uppercase text-[10px]">Rainfall Rate</span>
-                <span className="text-white font-bold block">{WEATHER_DATA.rainfallRate}</span>
-                <span className="text-slate-400 text-[10px]">Mumbai Regional avg</span>
-              </div>
-            </div>
+            ) : (
+              <div className="text-xs text-red-400 font-bold py-4">WEATHER DATA UNAVAILABLE</div>
+            )}
           </div>
 
         </div>
@@ -835,10 +1099,11 @@ function DashboardView({ drains, alerts, liveStats, onSelectDrain, onNavigate, i
             <div 
               key={alert.id}
               onClick={() => {
+                if (!alert.drainId) return;
                 const found = drains.find(d => d.id === alert.drainId);
                 if (found) onSelectDrain(found);
               }}
-              className="bg-slate-950 border border-slate-800 hover:border-slate-700 p-4 rounded-xl cursor-pointer transition-all space-y-3"
+              className={`bg-slate-950 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition-all space-y-3 ${alert.drainId ? 'cursor-pointer' : ''}`}
             >
               <div className="flex justify-between items-center">
                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
@@ -848,15 +1113,27 @@ function DashboardView({ drains, alerts, liveStats, onSelectDrain, onNavigate, i
                 }`}>
                   {alert.severity}
                 </span>
-                <span className="text-[10px] text-slate-500">{alert.time}</span>
+                <div className="flex items-center gap-2">
+                  {alert.kind === 'environmental' && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded uppercase font-bold bg-cyan-950 text-cyan-400 border border-cyan-500/30">
+                      ENV
+                    </span>
+                  )}
+                  <span className="text-[10px] text-slate-500">{alert.time}</span>
+                </div>
               </div>
               <div>
                 <h4 className="text-sm font-bold text-white mb-0.5">{alert.title}</h4>
-                <p className="text-xs text-slate-400 font-sans">{alert.drainId} — {alert.location}</p>
+                <p className="text-xs text-slate-400 font-sans">{alert.drainId ? `${alert.drainId} — ${alert.location}` : alert.location}</p>
               </div>
               <div className="text-[11px] text-slate-300 font-sans border-t border-slate-900 pt-2">
                 {alert.description}
               </div>
+              {alert.sources && alert.sources.length > 0 && (
+                <div className="text-[9px] text-slate-500">
+                  Sources: {alert.sources.join(' · ')}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -990,8 +1267,10 @@ function DrainsListView({ drains, onSelectDrain, searchQuery, setSearchQuery, fi
 }
 
 // 3. DRAIN DETAIL VIEW COMPONENT
-function DrainDetailPage({ drain, onBack }) {
+function DrainDetailPage({ drain, onBack, environment, envImpact }) {
   const pending = drain.awaitingDeployment;
+  const isLiveNode = drain.isLive === true;
+  const risk = isLiveNode ? computeDrainRisk({ drain, envImpact }) : null;
   return (
     <div className="space-y-8 animate-fadeIn">
       
@@ -1047,6 +1326,88 @@ function DrainDetailPage({ drain, onBack }) {
           </div>
         </div>
       )}
+
+      {/* Environmental conditions section — only shown for LIVE K-* nodes.
+          Data sources are labeled; APIs augment (never overwrite) Firebase
+          sensor readings. */}
+      {isLiveNode && environment && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4" data-testid={`drain-env-section-${drain.id}`}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <CloudRain size={18} className="text-cyan-400" />
+              <span>Environmental Conditions</span>
+              <span className="text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800">
+                AI Flood Impact — Prototype
+              </span>
+            </h3>
+            {risk && (
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-slate-400">Drain Risk:</span>
+                <span className={`px-2 py-0.5 rounded uppercase font-bold tracking-wider ${riskBadgeClasses(risk.level)}`}>
+                  {risk.level}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 uppercase block">Rainfall</span>
+              <span className="text-lg font-bold text-white block">
+                {environment.weather ? fmtMm(environment.weather.current.rainfallMm) : '—'}
+              </span>
+              <span className="text-[9px] text-slate-500">Open-Meteo · Live</span>
+            </div>
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 uppercase block">Forecast (6h peak)</span>
+              <span className="text-lg font-bold text-white block">
+                {environment.weather ? fmtMm(environment.weather.forecast.peakNext6hMm) : '—'}
+              </span>
+              <span className="text-[9px] text-slate-500">Open-Meteo</span>
+            </div>
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 uppercase block">Tide Trend</span>
+              <span className="text-lg font-bold text-white block">
+                {environment.tide ? (environment.tide.current.trend || 'unknown').toUpperCase() : '—'}
+              </span>
+              <span className="text-[9px] text-slate-500">{environment.tide ? environment.tide.source : 'Marine'}</span>
+            </div>
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 uppercase block">Sea Level</span>
+              <span className="text-lg font-bold text-white block">
+                {environment.tide ? fmtSeaLevel(environment.tide.current.seaLevelM) : '—'}
+              </span>
+              <span className="text-[9px] text-slate-500">MSL</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400 uppercase tracking-wider">Environmental Impact</span>
+              <span className={`px-2 py-0.5 rounded uppercase font-bold tracking-wider text-[10px] ${riskBadgeClasses(envImpact.level)}`}>
+                {envImpact.level}
+              </span>
+            </div>
+            {environment.tide && environment.tide.next.high && (
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+                <span className="text-[11px] text-slate-400 uppercase tracking-wider">Next High Tide</span>
+                <span className="text-xs text-cyan-400 font-bold">
+                  {environment.tide.next.high.in} · {fmtSeaLevel(environment.tide.next.high.seaLevelM)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="text-[10px] text-slate-500 flex flex-wrap gap-x-4 gap-y-1 pt-2 border-t border-slate-800">
+            <span>Sources:</span>
+            <span>Water level &amp; flow rate — <strong className="text-slate-300">Firebase (ESP32)</strong></span>
+            <span>Weather — <strong className="text-slate-300">{environment.weather ? 'Open-Meteo' : 'unavailable'}</strong></span>
+            <span>Tide — <strong className="text-slate-300">{environment.tide ? environment.tide.source : 'unavailable'}</strong></span>
+            <span>Updated: <strong className="text-slate-300">{Math.max(environment.lastWeatherAt || 0, environment.lastTideAt || 0) ? relativeAgo(Math.max(environment.lastWeatherAt || 0, environment.lastTideAt || 0)) : '—'}</strong></span>
+          </div>
+        </div>
+      )}
+
 
       {/* Grid: Sensor Data & ESP32-CAM */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -1275,12 +1636,24 @@ function DrainDetailPage({ drain, onBack }) {
 }
 
 // 4. ANALYTICS VIEW COMPONENT
-function AnalyticsView({ drains, liveStats, isLight }) {
+function AnalyticsView({ drains, liveStats, environment, isLight }) {
   const pieData = [
     { name: 'Healthy', value: liveStats?.healthy || SYSTEM_STATS.healthyCount, color: '#10b981' },
     { name: 'Warning', value: liveStats?.warning || SYSTEM_STATS.warningCount, color: '#f59e0b' },
     { name: 'Critical', value: liveStats?.critical || SYSTEM_STATS.criticalCount, color: '#ef4444' }
   ];
+
+  // Real hourly rainfall from Open-Meteo (next 6h). Falls back to null when
+  // the API is unavailable — the chart renders a friendly placeholder in that
+  // case rather than showing invented values.
+  const envRainfallData = environment?.weather?.forecast?.hourly?.precipitation
+    ? environment.weather.forecast.hourly.precipitation.map((mm, i) => ({
+        time: environment.weather.forecast.hourly.time[i]
+          ? environment.weather.forecast.hourly.time[i].slice(11, 16)
+          : `+${i}h`,
+        mm: mm ?? 0,
+      }))
+    : null;
 
   const waterLevelTrendData = [
     { time: '00:00', avgWater: 28, avgFlow: 3.8 },
@@ -1368,22 +1741,36 @@ function AnalyticsView({ drains, liveStats, isLight }) {
           </div>
         </div>
 
-        {/* Rainfall Intensity Trend */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4">
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <CloudRain size={18} className="text-amber-400" />
-            <span>Monsoon Rainfall Intensity Trend</span>
-          </h3>
+        {/* Environmental Conditions Trend — REAL Open-Meteo hourly rainfall (next 6h) */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 backdrop-blur-md space-y-4" data-testid="env-rainfall-trend">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <CloudRain size={18} className="text-amber-400" />
+              <span>Environmental Conditions Trend</span>
+              <span className="text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800">
+                Live · Open-Meteo
+              </span>
+            </h3>
+            <span className="text-[10px] text-slate-500">Next-6h hourly precipitation forecast</span>
+          </div>
           <div className="h-[280px] w-full pt-4">
-            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
-              <LineChart data={WEATHER_DATA.trend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="time" stroke="#64748b" fontSize={10} />
-                <YAxis stroke="#64748b" fontSize={10} />
-                <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#1e293b", borderRadius: "8px", fontSize: "12px", color: "#f8fafc" }} />
-                <Line type="monotone" dataKey="mm" stroke="#f59e0b" strokeWidth={2} name="Rainfall (mm/hr)" />
-              </LineChart>
-            </ResponsiveContainer>
+            {envRainfallData && envRainfallData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" minHeight={200}>
+                <LineChart data={envRainfallData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis dataKey="time" stroke="#64748b" fontSize={10} />
+                  <YAxis stroke="#64748b" fontSize={10} />
+                  <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#1e293b", borderRadius: "8px", fontSize: "12px", color: "#f8fafc" }} />
+                  <Line type="monotone" dataKey="mm" stroke="#f59e0b" strokeWidth={2} name="Rainfall (mm/hr)" />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+                <CloudRain size={28} className="opacity-40" />
+                <span className="text-[11px] uppercase tracking-widest text-red-400 font-bold">WEATHER DATA UNAVAILABLE</span>
+                <span className="text-[10px] text-slate-500">Rainfall trend will appear once Open-Meteo responds.</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1429,11 +1816,11 @@ function AlertsView({ alerts, onSelectDrain, filter, setFilter }) {
           <div 
             key={alert.id}
             data-testid={`alert-card-${alert.id}`}
-            onClick={() => onSelectDrain(alert.drainId)}
-            className="bg-slate-900/80 border border-slate-800 hover:border-slate-700 rounded-xl p-5 backdrop-blur-md cursor-pointer transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+            onClick={() => { if (alert.drainId) onSelectDrain(alert.drainId); }}
+            className={`bg-slate-900/80 border border-slate-800 hover:border-slate-700 rounded-xl p-5 backdrop-blur-md ${alert.drainId ? 'cursor-pointer' : ''} transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4`}
           >
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
+            <div className="space-y-2 flex-1">
+              <div className="flex items-center gap-3 flex-wrap">
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
                   alert.severity === 'critical' ? 'bg-red-950 text-red-400 border border-red-500/30' :
                   alert.severity === 'warning' ? 'bg-amber-950 text-amber-400 border border-amber-500/30' :
@@ -1441,20 +1828,36 @@ function AlertsView({ alerts, onSelectDrain, filter, setFilter }) {
                 }`}>
                   {alert.severity}
                 </span>
-                <span className="text-xs font-bold text-white">{alert.drainId} — {alert.location}, Mumbai</span>
+                {alert.kind === 'environmental' && (
+                  <span className="text-[10px] px-2 py-0.5 rounded uppercase font-bold tracking-wider bg-cyan-950 text-cyan-400 border border-cyan-500/30">
+                    ENV · Prototype
+                  </span>
+                )}
+                <span className="text-xs font-bold text-white">{alert.drainId ? `${alert.drainId} — ` : ''}{alert.location}{alert.drainId ? ', Mumbai' : ''}</span>
                 <span className="text-xs text-slate-500">{alert.time}</span>
               </div>
               <div>
                 <h4 className="text-sm font-bold text-slate-100">{alert.title}</h4>
                 <p className="text-xs text-slate-400 font-sans mt-0.5">{alert.description}</p>
+                {alert.sources && alert.sources.length > 0 && (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Sources: <strong className="text-slate-400">{alert.sources.join(' · ')}</strong>
+                  </p>
+                )}
               </div>
             </div>
 
             <div className="flex items-center gap-3 self-end sm:self-center">
-              <span className="text-xs text-blue-400 font-semibold hover:underline flex items-center gap-1">
-                <span>Inspect Drain</span>
-                <ArrowRight size={14} />
-              </span>
+              {alert.drainId ? (
+                <span className="text-xs text-blue-400 font-semibold hover:underline flex items-center gap-1">
+                  <span>Inspect Drain</span>
+                  <ArrowRight size={14} />
+                </span>
+              ) : (
+                <span className="text-xs text-cyan-400 font-semibold flex items-center gap-1">
+                  <span>City-wide Alert</span>
+                </span>
+              )}
             </div>
           </div>
         ))}
