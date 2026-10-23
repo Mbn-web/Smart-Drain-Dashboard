@@ -824,15 +824,6 @@ function DashboardView({ drains, alerts, liveStats, environment, envImpact, onSe
 
       </div>
 
-      {/* ENVIRONMENTAL FLOOD IMPACT SECTION (Open-Meteo weather + tide) */}
-      <EnvironmentalFloodImpact
-        environment={environment}
-        envImpact={envImpact}
-        drains={drains}
-        isLight={isLight}
-      />
-
-
       {/* GIS MAP SECTION (Leaflet) */}
       <div className={`${isLight ? 'bg-white border-slate-300 shadow-xl' : 'bg-slate-900/80 border-slate-800 shadow-xl'} border rounded-xl p-6 backdrop-blur-md space-y-4`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1139,6 +1130,14 @@ function DashboardView({ drains, alerts, liveStats, environment, envImpact, onSe
         </div>
       </div>
 
+
+      {/* ENVIRONMENTAL FLOOD IMPACT SECTION (Open-Meteo weather + tide) */}
+      <EnvironmentalFloodImpact
+        environment={environment}
+        envImpact={envImpact}
+        drains={drains}
+        isLight={isLight}
+      />
     </div>
   );
 }
